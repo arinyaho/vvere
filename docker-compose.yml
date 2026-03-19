@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cicd
+      POSTGRES_USER: cicd
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cicd"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  collector:
+    build: ./collector
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://cicd:${POSTGRES_PASSWORD}@postgres:5432/cicd
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      COLLECT_INTERVAL_SECONDS: ${COLLECT_INTERVAL_SECONDS:-300}
+      STALE_DAYS: ${STALE_DAYS:-3}
+      RETENTION_DAYS: ${RETENTION_DAYS:-90}
+      INITIAL_FETCH_DAYS: ${INITIAL_FETCH_DAYS:-90}
+      REPOS: ${REPOS:-}
+    volumes:
+      - trigger_vol:/trigger
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://cicd:${POSTGRES_PASSWORD}@postgres:5432/cicd
+      STALE_DAYS: ${STALE_DAYS:-3}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_ORG: ${GITHUB_ORG:-}
+      GITHUB_USERS: ${GITHUB_USERS:-}
+      ADMIN_USERS: ${ADMIN_USERS:-}
+      AUTH_DISABLED: ${AUTH_DISABLED:-false}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:9339}
+      ALLOWED_DOMAIN: ${ALLOWED_DOMAIN:-}
+    volumes:
+      - trigger_vol:/trigger
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "9339:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  trigger_vol:

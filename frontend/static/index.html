@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>vvere</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Login screen (hidden after auth check, content rendered by JS based on auth mode) -->
+  <div id="login-screen" style="display:none">
+    <div class="login-box">
+      <h1>vvere</h1>
+      <p class="muted">Loading...</p>
+    </div>
+  </div>
+
+  <!-- Setup wizard (shown when setup_complete is false) -->
+  <div id="setup-screen" style="display:none">
+    <div class="setup-wizard">
+      <h1>vvere setup</h1>
+
+      <!-- Step 1: Org -->
+      <div id="setup-step-org" class="setup-step">
+        <h2>1. Select your organization</h2>
+        <div id="setup-org-list" class="setup-list"><div class="loading">Loading orgs...</div></div>
+      </div>
+
+      <!-- Step 2: Repos -->
+      <div id="setup-step-repos" class="setup-step" style="display:none">
+        <h2>2. Select repos to track</h2>
+        <input type="text" id="setup-repo-search" class="setup-search" placeholder="Search repos..." oninput="debouncedFilterRepos()">
+        <div class="setup-controls">
+          <button class="btn-sm" onclick="setupSelectAll()">Select all</button>
+          <button class="btn-sm" onclick="setupDeselectAll()">Deselect all</button>
+          <span id="setup-repo-count" class="muted" style="margin-left:auto;font-size:11px"></span>
+        </div>
+        <div id="setup-repo-list" class="setup-list"><div class="loading">Loading repos...</div></div>
+      </div>
+
+      <!-- Step 3: Fetch period -->
+      <div id="setup-step-period" class="setup-step" style="display:none">
+        <h2>3. Initial data fetch period</h2>
+        <p class="muted">How far back should we collect CI/PR data?</p>
+        <div class="setup-period-options">
+          <label class="period-option"><input type="radio" name="period" value="7"> 7 days</label>
+          <label class="period-option"><input type="radio" name="period" value="30" checked> 1 month</label>
+          <label class="period-option"><input type="radio" name="period" value="90"> 3 months</label>
+          <label class="period-option"><input type="radio" name="period" value="180"> 6 months</label>
+          <label class="period-option"><input type="radio" name="period" value="365"> 1 year</label>
+        </div>
+      </div>
+
+      <!-- Step 4: Confirm -->
+      <div id="setup-step-confirm" class="setup-step" style="display:none">
+        <h2>4. Ready to go</h2>
+        <div id="setup-summary"></div>
+      </div>
+
+      <div class="setup-nav">
+        <button id="setup-back-btn" class="btn-ghost" onclick="setupBack()" style="display:none">Back</button>
+        <button id="setup-next-btn" class="btn-primary" onclick="setupNext()">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Collection progress (shown after setup while data is being fetched) -->
+  <div id="collecting-screen" style="display:none">
+    <div class="setup-wizard">
+      <h1>vvere</h1>
+      <h2>Collecting data...</h2>
+      <p class="muted" id="collecting-status">Waiting for collector to start...</p>
+      <div id="collecting-repos"></div>
+      <div class="progress-bar-wrap" style="margin-top:16px">
+        <div class="progress-bar" id="collecting-progress" style="width:0%"></div>
+      </div>
+      <p class="muted" style="margin-top:12px;font-size:11px">This may take a few minutes depending on the number of repos and fetch period.</p>
+    </div>
+  </div>
+
+  <!-- Dashboard (hidden until authenticated) -->
+  <div id="app" style="display:none">
+    <header>
+      <div class="header-left">
+        <h1>vvere</h1>
+        <span id="last-updated" class="muted">loading...</span>
+      </div>
+      <div class="header-right">
+        <span id="user-email" class="muted"></span>
+        <button id="refresh-btn" onclick="triggerRefresh()">Refresh</button>
+        <button class="logout-btn" onclick="logout()">Sign out</button>
+      </div>
+    </header>
+
+    <!-- Summary bar -->
+    <section class="summary-bar">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-repos">-</div>
+        <div class="stat-label">Repos</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-open-prs">-</div>
+        <div class="stat-label">Open PRs</div>
+      </div>
+      <div class="stat-card warn">
+        <div class="stat-value" id="stat-stale">-</div>
+        <div class="stat-label">Stale branches</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-velocity">-</div>
+        <div class="stat-label">Merges/day <span class="muted">(7d)</span></div>
+      </div>
+    </section>
+
+    <!-- Recommendation panel -->
+    <section id="recommend-panel" class="card recommend-card" style="display:none">
+      <h2>Recommended Action</h2>
+      <div id="recommend-alerts"></div>
+      <div id="recommend-insight"></div>
+    </section>
+
+    <div class="main-grid">
+      <div class="col">
+        <section class="card">
+          <h2>CI Status — Latest Run</h2>
+          <div id="ci-status-table"><div class="loading">Loading...</div></div>
+        </section>
+
+        <section class="card">
+          <h2>Success Rates</h2>
+          <div class="tab-bar">
+            <button class="tab active" onclick="switchRateTab('7d', this)">7 days</button>
+            <button class="tab" onclick="switchRateTab('30d', this)">30 days</button>
+            <button class="tab" onclick="switchRateTab('90d', this)">90 days</button>
+          </div>
+          <div id="success-rate-table"><div class="loading">Loading...</div></div>
+        </section>
+
+        <section class="card">
+          <h2>Avg CI Duration</h2>
+          <div class="tab-bar">
+            <button class="tab active" onclick="switchDurationTab('7d', this)">7 days</button>
+            <button class="tab" onclick="switchDurationTab('30d', this)">30 days</button>
+            <button class="tab" onclick="switchDurationTab('90d', this)">90 days</button>
+          </div>
+          <div id="duration-table"><div class="loading">Loading...</div></div>
+        </section>
+      </div>
+
+      <div class="col">
+        <section class="card">
+          <h2>My Stats</h2>
+          <div class="github-username-row">
+            <input id="github-username-input" type="text" placeholder="GitHub username" autocomplete="off">
+            <button onclick="saveAndLoadPersonal()">Apply</button>
+          </div>
+          <div id="personal-stats"><div class="empty">GitHub username을 입력하세요.</div></div>
+        </section>
+
+        <section class="card">
+          <h2>Open PRs by Repo</h2>
+          <div id="pr-summary"><div class="loading">Loading...</div></div>
+        </section>
+
+        <section class="card">
+          <h2>Staging Branches</h2>
+          <div id="staging-branches"><div class="loading">Loading...</div></div>
+        </section>
+
+        <section class="card">
+          <h2>
+            Stale Branches (&gt;3 days)
+            <button id="stale-sort-btn" onclick="toggleStaleSort()" style="float:right;font-size:0.75em;padding:2px 8px">↓ Newest</button>
+          </h2>
+          <div id="stale-branches"><div class="loading">Loading...</div></div>
+          <div id="stale-pagination" style="display:none;margin-top:10px;text-align:center"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
